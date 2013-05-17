@@ -9,9 +9,9 @@ import javacard.security.AESKey;
 import javacard.security.CryptoException;
 import javacard.security.DESKey;
 import javacard.security.Key;
-import javacard.security.KeyAgreement;
 import javacard.security.KeyBuilder;
 import javacard.security.KeyPair;
+import javacard.security.RSAPublicKey;
 import javacard.security.Signature;
 import javacardx.crypto.Cipher;
 
@@ -26,6 +26,15 @@ public class JcAES extends Applet {
 	final static byte SIGN_DATA = (byte) 0x05;
 	final static byte GET_PUBLIC_KEY = (byte) 0x06;
 	
+	final static byte RSA_ENCRYPT = (byte) 0x07;
+	final static byte RSA_DECRYPT = (byte) 0x08;
+	final static byte EXPORT_RSA_EXP = (byte) 0x09;
+	final static byte EXPORT_RSA_MOD = (byte) 0x10;
+	
+	final static byte IMPORT_CERT = (byte) 0x11;
+	final static byte EXPORT_CERT = (byte) 0x12;
+	final static byte GET_CERT_LEN = (byte) 0x13;
+	
 	//secret key
 	final static byte[] _aesKey = {(byte) 0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08};
 	final static byte[] _desKey = {(byte) 0x02,0x02,0x03,0x04,0x05,0x06,0x07,0x08};
@@ -37,6 +46,15 @@ public class JcAES extends Applet {
 	KeyPair _rsaKeyPair;
 	Signature _signature;
 	
+	Cipher rsaCipher;
+	byte[] rsaEncrypted,rsaDecrypted;
+	byte[] exponent,modulus;
+	
+	byte[] certificate;
+	short cert_len;
+	short cert_block_size = 120;
+	
+	
 	
 	public static void install(byte[] buffer, short offset, byte length) {
 		new JcAES();
@@ -44,9 +62,9 @@ public class JcAES extends Applet {
 	
 	private JcAES(){
 		//allocate all memory
-		dataToEncrypt = new byte[16];
-		dataToDecrypt = new byte[16];
-		result = new byte[16];
+		dataToEncrypt = new byte[64];
+		dataToDecrypt = new byte[64];
+		result = new byte[64];
 		
 		//KeyAgreement dhKeyAgreement = KeyAgreement.getInstance(KeyAgreement.ALG_EC_SVDP_DH, false);
 		_rsaKeyPair = new KeyPair(KeyPair.ALG_RSA, (short) 512);
@@ -55,6 +73,15 @@ public class JcAES extends Applet {
 		//dhKeyAgreement.init(_rsaKeyPair.getPrivate());
 		_signature = Signature.getInstance(Signature.ALG_RSA_SHA_PKCS1, false);
 
+		//rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
+		rsaEncrypted = new byte[64];
+		rsaDecrypted = new byte[64];
+		exponent = new byte[16];
+		modulus = new byte[64];
+		
+		certificate = new byte[1024];
+		cert_len = 0;
+		
 		register();
 	}
 
@@ -65,6 +92,9 @@ public class JcAES extends Applet {
 		}
 		
 		byte[] cmd = apdu.getBuffer();
+		
+		for(byte i=0;i<16;i++)
+			result[i]=0;
 		
 	    if (cmd[ISO7816.OFFSET_CLA] == CLASS) {  
 	    	switch(cmd[ISO7816.OFFSET_INS]) {      
@@ -121,11 +151,124 @@ public class JcAES extends Applet {
 	        		byte[] test = {1,2,3,4,5};
 	        		byte[] test_signature = new byte[64];//generate 64 byte signature
 	        		_signature.sign(test, (short)0	, (short)test.length, test_signature, (short)0);
-
+	        		
 		            apdu.setOutgoing();            
 		            apdu.setOutgoingLength((short)test_signature.length);
 		            apdu.sendBytesLong(test_signature, (short)0, (short)test_signature.length);
 		            break;
+	        	case RSA_ENCRYPT:
+	        		data_len = (short)(cmd[ISO7816.OFFSET_LC] & 0x00FF);
+	        		rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
+	        		rsaCipher.init(_rsaKeyPair.getPublic(), Cipher.MODE_ENCRYPT);
+	        		Util.arrayCopy(cmd, ISO7816.OFFSET_CDATA, dataToEncrypt, (short) 0, data_len);
+	        		rsaCipher.doFinal(dataToEncrypt, (byte)0, data_len, rsaEncrypted, (byte)0);
+
+	        		//rsaCipher.init(_rsaKeyPair.getPrivate(), Cipher.MODE_DECRYPT);
+	        		//rsaCipher.doFinal(rsaEncrypted, (byte)0, (short)64, dataToEncrypt, (byte)0);
+	        		
+	        		apdu.setOutgoing();
+	        		apdu.setOutgoingLength((short)rsaEncrypted.length);
+	        		apdu.sendBytesLong(rsaEncrypted, (short)0, (short)rsaEncrypted.length);
+		            break;
+		            
+	        	case RSA_DECRYPT:
+	        		data_len = (short)(cmd[ISO7816.OFFSET_LC] & 0x00FF);
+	        		rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
+	        		rsaCipher.init(_rsaKeyPair.getPrivate(), Cipher.MODE_DECRYPT);
+	        		Util.arrayCopy(cmd, ISO7816.OFFSET_CDATA, dataToDecrypt, (short) 0, data_len);
+	        		rsaCipher.doFinal(dataToDecrypt, (byte)0, (short)64, rsaDecrypted, (byte)0);
+	        		
+	        		apdu.setOutgoing();
+	        		apdu.setOutgoingLength((short)rsaDecrypted.length);
+	        		apdu.sendBytesLong(rsaDecrypted, (short)0, (short)rsaDecrypted.length);
+		            break;
+		            
+	        	case EXPORT_RSA_EXP:
+	        		try{
+	        		RSAPublicKey pubKey = (RSAPublicKey) _rsaKeyPair.getPublic();
+	        		pubKey.getExponent(exponent, (short) 0);
+	        		
+	        		apdu.setOutgoing();
+	        		apdu.setOutgoingLength((short)16);
+	        		apdu.sendBytesLong(exponent, (short)0, (short)16);
+	        		}catch(Exception e){
+	        			ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+	        		}
+	        		break;
+	        		
+	        	case EXPORT_RSA_MOD:
+	        		try{
+	        		RSAPublicKey pubKey = (RSAPublicKey) _rsaKeyPair.getPublic();
+	        		pubKey.getModulus(modulus, (short) 0);
+	        		
+	        		
+	        		apdu.setOutgoing();
+	        		apdu.setOutgoingLength((short)16);
+	        		apdu.sendBytesLong(modulus, (short)0, (short)16);
+	        		}catch(Exception e){
+	        			ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+	        		}
+	        		break;
+	        		
+	        	case IMPORT_CERT:
+//	        		cert_len = (short) (cert_len+(short)1);
+//	        		short le = apdu.setOutgoing();
+//	        		//if ( le < 2 )
+//	        		//	ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+//	        		
+//	        		apdu.setOutgoingLength((short)2);
+//	        		cmd[0] = (byte) (cert_len>>8);
+//					cmd[1] = (byte) (cert_len & 0x00ff);
+//	        		apdu.sendBytesLong(cmd, (short)0, (short)2);
+//	        		break;
+	        		
+	        		//ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+	        		data_len = 0;
+	        		byte blocknumber = cmd[ISO7816.OFFSET_P1];
+	        		try{
+	        		data_len = (short)(cmd[ISO7816.OFFSET_LC] & 0x00FF);
+	        		
+	        		
+	        		if(blocknumber == 0)
+	        			cert_len = 0;
+	        		cert_len += data_len;
+	        		//cert_len = (short) (cert_len+(short)1);
+	        		Util.arrayCopy(cmd, ISO7816.OFFSET_CDATA, certificate, (short) (blocknumber*cert_block_size), data_len);
+	        		}catch(Exception e){
+	        			ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+	        		}
+	        		short le = apdu.setOutgoing();
+	        		//if ( le < 2 )
+	        		//	ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+	        		
+	        		apdu.setOutgoingLength((short)2);
+	        		cmd[0] = (byte) (data_len>>8);
+					cmd[1] = (byte) (data_len & 0x00ff);
+	        		apdu.sendBytesLong(cmd, (short)0, (short)2);
+	        		break;
+	        		
+	        	case EXPORT_CERT:
+	        		try{
+	        			blocknumber = cmd[ISO7816.OFFSET_P1];
+	        			le = apdu.setOutgoing();
+	        			
+		        		apdu.setOutgoingLength(le);
+		        		apdu.sendBytesLong(certificate, (short) (blocknumber*cert_block_size), (short)le);
+	        			
+	        			
+	        		}catch(Exception e){
+	        			ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+	        		}
+	        		break;
+	        	case GET_CERT_LEN:
+	        		apdu.setOutgoing();
+	        		apdu.setOutgoingLength((short)2);
+	        		
+	        		cmd[0] = (byte) (cert_len>>8);
+	        		cmd[1] = (byte) (cert_len&0x00ff);
+	        		apdu.sendBytesLong(cmd, (short)0, (short)2);
+	        		break;
+	        		
 	        	default:
 	        		ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
 	        } 
