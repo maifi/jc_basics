@@ -177,11 +177,11 @@ public class JcAES extends Applet {
 				rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
 				rsaCipher.init(_rsaPubKey, Cipher.MODE_ENCRYPT);
 				Util.arrayCopy(cmd, ISO7816.OFFSET_CDATA, dataToEncrypt, (short) 0, data_len);
-				rsaCipher.doFinal(dataToEncrypt, (byte)0, data_len, rsaEncrypted, (byte)0);
+				short number_bytes = rsaCipher.doFinal(dataToEncrypt, (byte)0, data_len, rsaEncrypted, (byte)0);
 
 				apdu.setOutgoing();
-				apdu.setOutgoingLength((short)rsaEncrypted.length);
-				apdu.sendBytesLong(rsaEncrypted, (short)0, (short)rsaEncrypted.length);
+				apdu.setOutgoingLength(number_bytes);
+				apdu.sendBytesLong(rsaEncrypted, (short)0, number_bytes);
 				break;
 
 			case RSA_DECRYPT:
@@ -189,11 +189,11 @@ public class JcAES extends Applet {
 				rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
 				rsaCipher.init(_rsaPrivKey, Cipher.MODE_DECRYPT);
 				Util.arrayCopy(cmd, ISO7816.OFFSET_CDATA, dataToDecrypt, (short) 0, data_len);
-				rsaCipher.doFinal(dataToDecrypt, (byte)0, (short)64, rsaDecrypted, (byte)0);
+				number_bytes = rsaCipher.doFinal(dataToDecrypt, (byte)0, (short)64, rsaDecrypted, (byte)0);
 
 				apdu.setOutgoing();
-				apdu.setOutgoingLength((short)rsaDecrypted.length);
-				apdu.sendBytesLong(rsaDecrypted, (short)0, (short)rsaDecrypted.length);
+				apdu.setOutgoingLength(number_bytes);
+				apdu.sendBytesLong(rsaDecrypted, (short)0, number_bytes);
 				break;
 
 			case EXPORT_RSA_EXP:
